@@ -11,13 +11,19 @@ public class FileServer {
 
     private FileSystemManager fsManager;
     private int port;
+
     public FileServer(int port, String fileSystemName, int totalSize){
         // Initialize the FileSystemManager
-        FileSystemManager fsManager = new FileSystemManager(fileSystemName,
-                10*128 );
-        this.fsManager = fsManager;
         this.port = port;
+
+        try{
+            this.fsManager = new FileSystemManager(fileSystemName,
+                    totalSize );
+        } catch (Exception e){
+            e.printStackTrace();
+            throw new RuntimeException("Failed to initialize FileSystemManager");
     }
+}
 
     public void start(){
         try (ServerSocket serverSocket = new ServerSocket(12345)) {
