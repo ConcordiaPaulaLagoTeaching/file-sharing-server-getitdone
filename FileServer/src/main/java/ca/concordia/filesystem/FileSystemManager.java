@@ -216,6 +216,38 @@ public class FileSystemManager {
     }
 
    
+ //deleteFile
+    public void deleteFile(String fileName) throws Exception {
+        globalLock.lock();
+        try {
+            int inodeIndex = findInodeIndex(fileName);
+            if (inodeIndex == -1) {
+                throw new Exception("Error: File " + fileName + " not found.");
+            }
+
+            FEntry target = inodeTable[inodeIndex];
+
+            // Free blocks
+            short currentBlock = target.getFirstBlock();
+            while (currentBlock != -1) {
+                freeBlockList[currentBlock] = true; // Mark block as free
+
+                // (improvement: add FNode linkage)
+                currentBlock++;
+                if (currentBlock >= freeBlockList.length) break;
+            }
+
+            // Remove from inode table
+            inodeTable[inodeIndex] = null;
+
+            System.out.println("File " + fileName + " deleted successfully.");
+
+        } finally {
+            globalLock.unlock();
+        }
+    }
+
+
 
 
     // TODO:  writeFile and other required methods,
