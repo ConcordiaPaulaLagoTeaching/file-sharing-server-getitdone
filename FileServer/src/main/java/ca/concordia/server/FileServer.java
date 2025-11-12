@@ -57,7 +57,7 @@ public class FileServer {
                 PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true)
             ) {
                 String line;
-                writer.println("✅ Connected to FileServer. Type commands:");
+                writer.println(" Connected to FileServer. Type commands:");
 
                 while ((line = reader.readLine()) != null) {
                     System.out.println("[Client " + clientSocket.getInetAddress() + "] " + line);
