@@ -18,6 +18,38 @@ public class FileSystemManager {
     private FEntry[] inodeTable; // Array of inodes
     private boolean[] freeBlockList; // Bitmap for free blocks
 
+    private long blockToOffset(int blockIndex) {
+    return (long) blockIndex * BLOCK_SIZE;
+    }
+
+    private int findInodeIndex(String fileName) {
+    for (int i = 0; i < inodeTable.length; i++) {
+        FEntry entry = inodeTable[i];
+        if (entry != null && entry.getFilename().equals(fileName)) {
+            return i;
+        }
+    }
+    return -1; // File not found
+    }
+
+    private void writeFEntryToDisk(int inodeIndex, FEntry entry) throws Exception {
+    long offset = inodeIndex * 32L; // Each inode entry takes 32 bytes (example)
+    disk.seek(offset);
+
+    // Write filename (fixed 12 bytes — padded or truncated)
+    byte[] nameBytes = new byte[12];
+    byte[] actualName = entry.getFilename().getBytes();
+    int len = Math.min(actualName.length, 11);
+    System.arraycopy(actualName, 0, nameBytes, 0, len);
+    disk.write(nameBytes);
+
+    // Write filesize (2 bytes)
+    disk.writeShort(entry.getFilesize());
+
+    // Write first block (2 bytes)
+    disk.writeShort(entry.getFirstBlock());
+    }   
+
     public FileSystemManager(String filename, int totalSize) throws Exception {
         // Initialize the file system manager with a file
         if(instance == null) {
@@ -29,6 +61,7 @@ public class FileSystemManager {
             this.disk = new RandomAccessFile(filename, "rw");
             this.disk.setLength(totalSize);
             //TODO Initialize the file system
+            instance = this;
         } else {
             throw new IllegalStateException("FileSystemManager is already initialized.");
         }
@@ -90,5 +123,60 @@ public class FileSystemManager {
     }
 
 
+    public void writeFile(String fileName, String content) throws Exception {
+        globalLock.lock();
+        try {
+            FEntry target = null;
+            for (FEntry entry : inodeTable) {
+                if (entry != null && entry.getFilename().equals(fileName)) {
+                    target = entry;
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new Exception("Error: File " + fileName+  " not found.");
+            }
+
+            byte[] data = content.getBytes();
+            int blocksNeeded = (int) Math.ceil((double) data.length / BLOCK_SIZE);
+
+            int freeCount = 0;
+            for (boolean free : freeBlockList) {
+                if (free) freeCount++;
+            }
+
+            if (blocksNeeded > freeCount) {
+                throw new Exception("Error: Not enough free blocks available.");
+            }
+
+            int dataOffset = 0;
+            short lastBlockIndex = -1;
+            short firstBlockIndex = target.getFirstBlock();
+
+            disk.seek(blockToOffset(firstBlockIndex));
+            int firstChunkSize = Math.min(BLOCK_SIZE, data.length);
+            disk.write(data, 0, firstChunkSize);
+            dataOffset += firstChunkSize;
+
+            for(int i = 0; i < freeBlockList.length && dataOffset < data.length; i++) {
+                if (freeBlockList[i]) {
+                    freeBlockList[i] = false; // Mark block as used
+                    disk.seek(blockToOffset(i));
+                    int chunkSize = Math.min(BLOCK_SIZE, data.length - dataOffset);
+                    disk.write(data, dataOffset, chunkSize);
+                    dataOffset += chunkSize;
+                    lastBlockIndex = (short)i;
+                }
+            }
+
+            target.setFilesize((short)data.length);
+            writeFEntryToDisk(findInodeIndex(fileName), target);
+
+            System.out.println("File " + fileName + " written successfully (" + data.length + " bytes).");
+
+        } finally {
+            globalLock.unlock();
+        }
+    }
     // TODO: Add readFile, writeFile and other required methods,
 }

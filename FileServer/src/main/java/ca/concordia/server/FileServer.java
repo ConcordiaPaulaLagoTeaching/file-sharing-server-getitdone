@@ -48,6 +48,19 @@ public class FileServer {
                                 writer.println("SUCCESS: File '" + parts[1] + "' created.");
                                 writer.flush();
                                 break;
+
+                            case "WRITE":
+                            try{
+                                String filename = parts[1];
+                                String content = line.substring(line.indexOf(' ', line.indexOf(' ') + 1) + 1); // extract all text after filename
+                                fsManager.writeFile(filename, content); // ✅ matches your method
+                                writer.println("SUCCESS: File '" + filename + "' written.");
+                                writer.flush();
+                                } catch (Exception e){
+                                    writer.println("ERROR: " + e.getMessage());
+                                    writer.flush();
+                                }
+                                break;
                             //TODO: Implement other commands READ, WRITE, DELETE, LIST
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
@@ -55,6 +68,8 @@ public class FileServer {
                             default:
                                 writer.println("ERROR: Unknown command.");
                                 break;
+                            
+                            
                         }
                     }
                 } catch (Exception e) {
