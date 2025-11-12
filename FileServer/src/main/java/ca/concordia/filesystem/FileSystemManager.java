@@ -124,63 +124,70 @@ public class FileSystemManager {
 
 
     public void writeFile(String fileName, String content) throws Exception {
-        globalLock.lock();
-        try {
-            FEntry target = null;
-            for (FEntry entry : inodeTable) {
-                if (entry != null && entry.getFilename().equals(fileName)) {
-                    target = entry;
-                    break;
-                }
-            }
-            if (target == null) {
-                throw new Exception("Error: File " + fileName+  " not found.");
-            }
-
-            byte[] data = content.getBytes();
-            int blocksNeeded = (int) Math.ceil((double) data.length / BLOCK_SIZE);
-
-            int freeCount = 0;
-            for (boolean free : freeBlockList) {
-                if (free) freeCount++;
-            }
-
-            if (blocksNeeded > freeCount) {
-                throw new Exception("Error: Not enough free blocks available.");
-            }
-
-            int dataOffset = 0;
-            short lastBlockIndex = -1;
-            short firstBlockIndex = target.getFirstBlock();
-
-            disk.seek(blockToOffset(firstBlockIndex));
-            int firstChunkSize = Math.min(BLOCK_SIZE, data.length);
-            disk.write(data, 0, firstChunkSize);
-            dataOffset += firstChunkSize;
-
-            for(int i = 0; i < freeBlockList.length && dataOffset < data.length; i++) {
-                if (freeBlockList[i]) {
-                    freeBlockList[i] = false; // Mark block as used
-                    disk.seek(blockToOffset(i));
-                    int chunkSize = Math.min(BLOCK_SIZE, data.length - dataOffset);
-                    disk.write(data, dataOffset, chunkSize);
-                    dataOffset += chunkSize;
-                    lastBlockIndex = (short)i;
-                }
-            }
-
-            target.setFilesize((short)data.length);
-            writeFEntryToDisk(findInodeIndex(fileName), target);
-
-            System.out.println("File " + fileName + " written successfully (" + data.length + " bytes).");
-
-        } finally {
-            globalLock.unlock();
+    globalLock.lock();
+    try {
+        int fileIndex = findInodeIndex(fileName);
+        if (fileIndex == -1) {
+            throw new Exception("ERROR: file " + fileName + " does not exist.");
         }
+
+        FEntry target = inodeTable[fileIndex];
+        byte[] data = content.getBytes();
+        int blocksNeeded = (int) Math.ceil((double) data.length / BLOCK_SIZE);
+
+        // Count available blocks
+        int freeCount = 0;
+        for (boolean free : freeBlockList) {
+            if (free) freeCount++;
+        }
+
+        if (blocksNeeded > freeCount) {
+            throw new Exception("ERROR: file too large — not enough free blocks.");
+        }
+
+        // Clear previous data
+        byte[] zeroBuffer = new byte[BLOCK_SIZE];
+        short firstBlock = target.getFirstBlock();
+        if (firstBlock >= 0) {
+            for (int i = firstBlock; i < freeBlockList.length; i++) {
+                if (!freeBlockList[i]) {
+                    disk.seek(blockToOffset(i));
+                    disk.write(zeroBuffer);
+                    freeBlockList[i] = true;
+                }
+            }
+        }
+
+        // Write new data
+        int dataOffset = 0;
+        short firstAllocatedBlock = -1;
+        for (short i = 0; i < freeBlockList.length && dataOffset < data.length; i++) {
+            if (freeBlockList[i]) {
+                if (firstAllocatedBlock == -1) {
+                    firstAllocatedBlock = i;
+                }
+                freeBlockList[i] = false;
+                disk.seek(blockToOffset(i));
+                int chunkSize = Math.min(BLOCK_SIZE, data.length - dataOffset);
+                disk.write(data, dataOffset, chunkSize);
+                dataOffset += chunkSize;
+            }
+        }
+
+        target.setFilesize((short) data.length);
+        target.setFirstBlock(firstAllocatedBlock);
+        writeFEntryToDisk(fileIndex, target);
+
+        System.out.println("File " + fileName + " written successfully (" +
+                data.length + " bytes, " + blocksNeeded + " blocks).");
+
+    } finally {
+        globalLock.unlock();
     }
+}
 
     //readFile
-    public String readfile(String fileName) throws Exception {
+    public String readFile(String fileName) throws Exception {
         globalLock.lock();
         try {
             FEntry target = null;
@@ -215,37 +222,36 @@ public class FileSystemManager {
         }
     }
 
-   
- //deleteFile
-    public void deleteFile(String fileName) throws Exception {
-        globalLock.lock();
-        try {
-            int inodeIndex = findInodeIndex(fileName);
-            if (inodeIndex == -1) {
-                throw new Exception("Error: File " + fileName + " not found.");
-            }
-
-            FEntry target = inodeTable[inodeIndex];
-
-            // Free blocks
-            short currentBlock = target.getFirstBlock();
-            while (currentBlock != -1) {
-                freeBlockList[currentBlock] = true; // Mark block as free
-
-                // (improvement: add FNode linkage)
-                currentBlock++;
-                if (currentBlock >= freeBlockList.length) break;
-            }
-
-            // Remove from inode table
-            inodeTable[inodeIndex] = null;
-
-            System.out.println("File " + fileName + " deleted successfully.");
-
-        } finally {
-            globalLock.unlock();
+   //deleteFile
+ public void deleteFile(String fileName) throws Exception {
+    globalLock.lock();
+    try {
+        int inodeIndex = findInodeIndex(fileName);
+        if (inodeIndex == -1) {
+            throw new Exception("ERROR: file " + fileName + " does not exist.");
         }
+
+        FEntry target = inodeTable[inodeIndex];
+        byte[] zeroBuffer = new byte[BLOCK_SIZE];
+
+        short currentBlock = target.getFirstBlock();
+        while (currentBlock != -1) {
+            disk.seek(blockToOffset(currentBlock));
+            disk.write(zeroBuffer);
+            freeBlockList[currentBlock] = true;
+
+            // (improvement: replace this with FNode linkage later)
+            currentBlock++;
+            if (currentBlock >= freeBlockList.length) break;
+        }
+
+        inodeTable[inodeIndex] = null;
+        System.out.println("File " + fileName + " deleted successfully.");
+
+    } finally {
+        globalLock.unlock();
     }
+}
 
 //listFiles
     public String[] listFiles() {
@@ -261,5 +267,5 @@ public class FileSystemManager {
     }
 
 
-    // TODO:  writeFile and other required methods,
+
 }
