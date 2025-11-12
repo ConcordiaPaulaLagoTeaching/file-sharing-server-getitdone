@@ -178,5 +178,45 @@ public class FileSystemManager {
             globalLock.unlock();
         }
     }
-    // TODO: Add readFile, writeFile and other required methods,
+
+    //readFile
+    public String readfile(String fileName) throws Exception {
+        globalLock.lock();
+        try {
+            FEntry target = null;
+            for (FEntry entry : inodeTable) {
+                if (entry != null && entry.getFilename().equals(fileName)) {
+                    target = entry;
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new Exception("Error: File " + fileName + " does not exist.");
+            }
+
+            byte[] data = new byte[target.getFilesize()];
+            int bytesRead = 0;
+            short currentBlock = target.getFirstBlock();
+        while (currentBlock != -1 && bytesRead < target.getFilesize()) {
+            disk.seek(blockToOffset(currentBlock));
+            int bytesToRead = Math.min(BLOCK_SIZE, target.getFilesize() - bytesRead);
+            disk.readFully(data, bytesRead, bytesToRead);
+            bytesRead += bytesToRead;
+
+            // (improvement: add FNode linkage)
+            currentBlock++;
+            if (currentBlock >= freeBlockList.length) break;
+        }
+
+        return new String(data);
+
+        } finally {
+            globalLock.unlock();
+        }
+    }
+
+   
+
+
+    // TODO:  writeFile and other required methods,
 }
