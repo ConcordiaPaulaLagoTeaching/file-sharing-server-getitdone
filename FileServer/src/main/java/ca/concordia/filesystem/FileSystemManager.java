@@ -247,7 +247,18 @@ public class FileSystemManager {
         }
     }
 
-
+//listFiles
+    public String[] listFiles() {
+        globalLock.lock();
+        try {
+            return java.util.Arrays.stream(inodeTable)
+                    .filter(e -> e != null)
+                    .map(FEntry::getFilename)
+                    .toArray(String[]::new);
+        } finally {
+            globalLock.unlock();
+        }
+    }
 
 
     // TODO:  writeFile and other required methods,
