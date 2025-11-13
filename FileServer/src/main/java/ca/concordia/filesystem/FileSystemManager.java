@@ -6,7 +6,6 @@ import java.io.RandomAccessFile;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class FileSystemManager {
-//testtttt
     private final int MAXFILES = 5;
     private final int MAXBLOCKS = 10;
     private static FileSystemManager instance;
@@ -19,7 +18,7 @@ public class FileSystemManager {
     private boolean[] freeBlockList; // Bitmap for free blocks
 
     private long blockToOffset(int blockIndex) {
-    return (long) blockIndex * BLOCK_SIZE;
+    return 32 * 5 + (long) blockIndex * BLOCK_SIZE;
     }
 
     private int findInodeIndex(String fileName) {

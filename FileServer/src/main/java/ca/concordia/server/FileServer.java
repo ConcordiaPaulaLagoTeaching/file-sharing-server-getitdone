@@ -23,11 +23,11 @@ public class FileServer {
 
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("✅ FileServer started on port " + port);
+            System.out.println("FileServer started on port " + port);
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("➡️ New client connected: " + clientSocket.getInetAddress());
+                System.out.println("New client connected: " + clientSocket.getInetAddress());
                 // Handle each client in a separate thread
                 new Thread(new ClientHandler(clientSocket, fsManager)).start();
             }
