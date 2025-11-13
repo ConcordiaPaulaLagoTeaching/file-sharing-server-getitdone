@@ -5,11 +5,18 @@ import ca.concordia.filesystem.FileSystemManager;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class FileServer {
 
     private final FileSystemManager fsManager;
     private final int port;
+    private final ExecutorService threadPool = Executors.newFixedThreadPool(50, runnable -> {
+        Thread t = new Thread(runnable);
+        t.setName("ClientHandlerThread-" + t.getId());
+        return t;
+    });
 
     public FileServer(int port, String fileSystemName, int totalSize) {
         this.port = port;
@@ -29,12 +36,15 @@ public class FileServer {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("New client connected: " + clientSocket.getInetAddress());
                 // Handle each client in a separate thread
-                new Thread(new ClientHandler(clientSocket, fsManager)).start();
+               threadPool.submit(new ClientHandler(clientSocket, fsManager));
             }
 
         } catch (Exception e) {
             e.printStackTrace();
             System.err.println(" Could not start server on port " + port);
+        } finally {
+            threadPool.shutdown();
+            System.out.println("Server shutting down.");
         }
     }
 
