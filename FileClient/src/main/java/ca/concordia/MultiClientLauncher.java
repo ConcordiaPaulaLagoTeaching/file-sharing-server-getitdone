@@ -5,7 +5,6 @@ import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-//test launcher for multiple clients
 public class MultiClientLauncher {
 
     private static class TestClient implements Runnable {
@@ -25,7 +24,7 @@ public class MultiClientLauncher {
 
                 System.out.println(clientName + " connected to server");
 
-
+                // Read initial server message
                 System.out.println(reader.readLine());
 
                 for (String cmd : commands) {
@@ -36,8 +35,8 @@ public class MultiClientLauncher {
                     String response = reader.readLine();
                     System.out.println("[" + clientName + "] Response: " + response);
 
-
-                    Thread.sleep(200);
+                    // Optional: small delay to simulate real interaction
+                    Thread.sleep(500);
                 }
 
                 writer.println("QUIT");
@@ -50,24 +49,25 @@ public class MultiClientLauncher {
     }
 
     public static void main(String[] args) {
-        // Create a thread pool large enough for 20 clients
-        ExecutorService executor = Executors.newFixedThreadPool(20);
+        // Create a thread pool for clients
+        ExecutorService executor = Executors.newFixedThreadPool(3);
 
-        // Generate 20 clients
-        for (int i = 1; i <= 20; i++) {
-            String clientName = "Client" + i;
+        // Define commands for each client
+        String[] clientACommands = {"CREATE testA.txt", "WRITE testA.txt Hello from ClientA", "READ testA.txt"};
+        String[] clientBCommands = {"READ testA.txt", "WRITE testA.txt Added text from ClientB", "READ testA.txt"};
+        String[] clientCCommands = {"READ testA.txt", "READ testA.txt", "READ testA.txt"};
 
-            //each client creates its own file and writes to it
-            String fileName = "file" + i + ".txt";
-            String[] commands = {
-                    "CREATE " + fileName,
-                    "WRITE " + fileName + " Hello from " + clientName,
-                    "READ " + fileName
-            };
+        // Submit clients to the executor
+        executor.submit(new TestClient("ClientA", clientACommands));
+        executor.submit(new TestClient("ClientB", clientBCommands));
+        executor.submit(new TestClient("ClientC", clientCCommands));
 
-            executor.submit(new TestClient(clientName, commands));
-        }
 
+
+
+
+
+        // Shutdown executor after all clients finish
         executor.shutdown();
     }
 }
