@@ -10,11 +10,10 @@ public class ClientC {
              PrintWriter writer = new PrintWriter(socket.getOutputStream(), true)) {
 
             System.out.println("ClientC connected to server");
-            System.out.println(reader.readLine()); // Server greeting
+            System.out.println(reader.readLine());
 
-            String filename = "testA.txt"; // file to monitor
+            String filename = "testA.txt"; 
 
-            // Repeatedly read the same file every few seconds
             for (int i = 1; i <= 5; i++) {
                 writer.println("READ " + filename);
                 String responseLine;
@@ -26,7 +25,7 @@ public class ClientC {
                         break;
                 }
 
-                Thread.sleep(3000); // Wait 3 seconds before next read
+                Thread.sleep(3000);
             }
 
             writer.println("QUIT");

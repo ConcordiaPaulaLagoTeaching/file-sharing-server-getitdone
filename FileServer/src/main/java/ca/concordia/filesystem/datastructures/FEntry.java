@@ -1,12 +1,21 @@
 package ca.concordia.filesystem.datastructures;
 
 import java.util.LinkedList;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class FEntry {
 
     private String filename;
     private short filesize;
-    private short firstBlock; // Pointers to data blocks
+    private short firstBlock; 
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+
+    public void acquireRead() { lock.readLock().lock(); }
+    public void releaseRead() { lock.readLock().unlock(); }
+
+    public void acquireWrite() { lock.writeLock().lock(); }
+    public void releaseWrite() { lock.writeLock().unlock(); }
+
 
     public FEntry(String filename, short filesize, short firstblock) throws IllegalArgumentException{
         //Check filename is max 11 bytes long

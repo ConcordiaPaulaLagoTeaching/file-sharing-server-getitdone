@@ -11,10 +11,10 @@ public class ClientA {
 
             System.out.println("ClientA connected to server");
 
-            // Skip initial welcome message
+
             System.out.println(reader.readLine());
 
-            // Send some commands automatically
+
             writer.println("CREATE testA.txt");
             System.out.println(reader.readLine());
 

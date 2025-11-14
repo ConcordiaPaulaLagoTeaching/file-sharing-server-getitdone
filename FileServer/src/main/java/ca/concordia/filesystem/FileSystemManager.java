@@ -3,36 +3,55 @@ package ca.concordia.filesystem;
 import ca.concordia.filesystem.datastructures.FEntry;
 
 import java.io.RandomAccessFile;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
+
 
 public class FileSystemManager {
+
     private final int MAXFILES = 5;
-    private final int MAXBLOCKS = 10;
+    private final int MAXBLOCKS = 5;
     private static FileSystemManager instance;
     private final RandomAccessFile disk;
-    private static final int BLOCK_SIZE = 128; // Example block size
 
-    private final ReentrantReadWriteLock fsLock = new ReentrantReadWriteLock(true);
+    private static final int BLOCK_SIZE = 128;
+    private final FEntry[] inodeTable;
+    private final boolean[] freeBlockList;
 
-    private FEntry[] inodeTable; // Array of inodes
-    private boolean[] freeBlockList; // Bitmap for free blocks
+    // Protects inodeTable and freeBlockList
+    private final ReentrantLock globalLock = new ReentrantLock(true);
 
+    public FileSystemManager(String filename, int totalSize) throws Exception {
+        if (instance == null) {
+            this.inodeTable = new FEntry[MAXFILES];
+            this.freeBlockList = new boolean[MAXBLOCKS];
+            for (int i = 0; i < MAXBLOCKS; i++) freeBlockList[i] = true;
+
+            this.disk = new RandomAccessFile(filename, "rw");
+            this.disk.setLength(totalSize);
+
+            instance = this;
+        } else {
+            throw new IllegalStateException("FileSystemManager is already initialized.");
+        }
+    }
+
+
+    // Inode table occupies first MAXFILES * 32 bytes
     private long blockToOffset(int blockIndex) {
-        return 32 * 5 + (long) blockIndex * BLOCK_SIZE;
+        int inodeTableSize = 32 * MAXFILES;
+        return inodeTableSize + (long) blockIndex * BLOCK_SIZE;
     }
 
     private int findInodeIndex(String fileName) {
         for (int i = 0; i < inodeTable.length; i++) {
             FEntry entry = inodeTable[i];
-            if (entry != null && entry.getFilename().equals(fileName)) {
-                return i;
-            }
+            if (entry != null && entry.getFilename().equals(fileName)) return i;
         }
-        return -1; // File not found
+        return -1;
     }
 
     private void writeFEntryToDisk(int inodeIndex, FEntry entry) throws Exception {
-        long offset = inodeIndex * 32L; // Each inode entry takes 32 bytes (example)
+        long offset = inodeIndex * 32L; 
         disk.seek(offset);
 
         byte[] nameBytes = new byte[12];
@@ -44,33 +63,15 @@ public class FileSystemManager {
         disk.writeShort(entry.getFilesize());
         disk.writeShort(entry.getFirstBlock());
     }
-
-    public FileSystemManager(String filename, int totalSize) throws Exception {
-        if (instance == null) {
-            this.inodeTable = new FEntry[MAXFILES];
-            this.freeBlockList = new boolean[MAXBLOCKS];
-            for (int i = 0; i < MAXBLOCKS; i++) {
-                freeBlockList[i] = true;
-            }
-            this.disk = new RandomAccessFile(filename, "rw");
-            this.disk.setLength(totalSize);
-            instance = this;
-        } else {
-            throw new IllegalStateException("FileSystemManager is already initialized.");
-        }
-    }
-
+//Create
     public void createFile(String fileName) throws Exception {
-        fsLock.writeLock().lock();
-        try {
-            if (fileName == null || fileName.isEmpty())
-                throw new IllegalArgumentException("Filename cannot be null or empty.");
-            if (fileName.length() > 11)
-                throw new IllegalArgumentException("Filename cannot be longer than 11 characters.");
+        if (fileName == null || fileName.isEmpty()) throw new IllegalArgumentException("Filename cannot be null or empty.");
+        if (fileName.length() > 11) throw new IllegalArgumentException("Filename cannot be longer than 11 characters.");
 
-            for (FEntry entry : inodeTable) {
-                if (entry != null && entry.getFilename().equals(fileName))
-                    throw new IllegalArgumentException("File " + fileName + " already exists.");
+        globalLock.lock();
+        try {
+            if (findInodeIndex(fileName) != -1) {
+                throw new IllegalArgumentException("File with the name " + fileName + " already exists.");
             }
 
             int freeInodeIndex = -1;
@@ -80,8 +81,7 @@ public class FileSystemManager {
                     break;
                 }
             }
-            if (freeInodeIndex == -1)
-                throw new Exception("Error: Maximum number of files reached.");
+            if (freeInodeIndex == -1) throw new Exception("Error: Maximum number of files reached.");
 
             short firstFreeBlock = -1;
             for (short i = 0; i < freeBlockList.length; i++) {
@@ -91,136 +91,154 @@ public class FileSystemManager {
                     break;
                 }
             }
-            if (firstFreeBlock == -1)
-                throw new Exception("Error: No free blocks available.");
+            if (firstFreeBlock == -1) throw new Exception("Error: No free blocks available.");
 
             inodeTable[freeInodeIndex] = new FEntry(fileName, (short) 0, firstFreeBlock);
-            System.out.println("File " + fileName + " created successfully (block " + firstFreeBlock + ").");
 
+            writeFEntryToDisk(freeInodeIndex, inodeTable[freeInodeIndex]);
+
+            System.out.println("File " + fileName + " created successfully (block " + firstFreeBlock + ").");
         } finally {
-            fsLock.writeLock().unlock();
+            globalLock.unlock();
         }
     }
 
+//Write
     public void writeFile(String fileName, String content) throws Exception {
-        fsLock.writeLock().lock();
-        try {
-            int fileIndex = findInodeIndex(fileName);
-            if (fileIndex == -1)
-                throw new Exception("ERROR: file " + fileName + " does not exist.");
+        int inodeIndex = findInodeIndex(fileName);
+        if (inodeIndex == -1) throw new Exception("Error: File " + fileName + " does not exist.");
 
-            FEntry target = inodeTable[fileIndex];
+        FEntry f = inodeTable[inodeIndex];
+
+        // Acquire exclusive write lock on this file
+        f.acquireWrite();
+        try {
             byte[] data = content.getBytes();
             int blocksNeeded = (int) Math.ceil((double) data.length / BLOCK_SIZE);
 
-            int freeCount = 0;
-            for (boolean free : freeBlockList)
-                if (free) freeCount++;
-            if (blocksNeeded > freeCount)
-                throw new Exception("ERROR: file too large — not enough free blocks.");
+            // Allocate free blocks
+            globalLock.lock();
+            short allocatedFirst = -1;
+            try {
+                // count free blocks
+                int freeCount = 0;
+                for (boolean free : freeBlockList) if (free) freeCount++;
+                if (blocksNeeded > freeCount) throw new Exception("Error: File too large.");
 
-            byte[] zeroBuffer = new byte[BLOCK_SIZE];
-            short firstBlock = target.getFirstBlock();
-            if (firstBlock >= 0) {
-                for (int i = firstBlock; i < freeBlockList.length; i++) {
-                    if (!freeBlockList[i]) {
-                        disk.seek(blockToOffset(i));
-                        disk.write(zeroBuffer);
-                        freeBlockList[i] = true;
+                short prev = f.getFirstBlock();
+                if (prev >= 0) {
+                    for (int i = prev; i < freeBlockList.length; i++) {
+                        if (!freeBlockList[i]) {
+                            freeBlockList[i] = true;
+                        }
                     }
                 }
+
+                // allocate new blocks
+                int alloc = 0;
+                for (short i = 0; i < freeBlockList.length && alloc < blocksNeeded; i++) {
+                    if (freeBlockList[i]) {
+                        if (allocatedFirst == -1) allocatedFirst = i;
+                        freeBlockList[i] = false;
+                        alloc++;
+                    }
+                }
+
+                // update inmemory inode
+                f.setFilesize((short) data.length);
+                f.setFirstBlock(allocatedFirst);
+
+            } finally {
+                globalLock.unlock();
             }
 
+            // Write file data
             int dataOffset = 0;
-            short firstAllocatedBlock = -1;
-            for (short i = 0; i < freeBlockList.length && dataOffset < data.length; i++) {
-                if (freeBlockList[i]) {
-                    if (firstAllocatedBlock == -1)
-                        firstAllocatedBlock = i;
-                    freeBlockList[i] = false;
-                    disk.seek(blockToOffset(i));
-                    int chunkSize = Math.min(BLOCK_SIZE, data.length - dataOffset);
-                    disk.write(data, dataOffset, chunkSize);
-                    dataOffset += chunkSize;
-                }
+            short block = f.getFirstBlock();
+            while (dataOffset < data.length && block >= 0 && block < freeBlockList.length) {
+                disk.seek(blockToOffset(block));
+                int chunkSize = Math.min(BLOCK_SIZE, data.length - dataOffset);
+                disk.write(data, dataOffset, chunkSize);
+                dataOffset += chunkSize;
+                block++;
             }
 
-            target.setFilesize((short) data.length);
-            target.setFirstBlock(firstAllocatedBlock);
-            writeFEntryToDisk(fileIndex, target);
 
-            System.out.println("File " + fileName + " written successfully (" +
-                    data.length + " bytes, " + blocksNeeded + " blocks).");
+            writeFEntryToDisk(inodeIndex, f);
+
+            System.out.println("File " + fileName + " written successfully (" + data.length + " bytes).");
         } finally {
-            fsLock.writeLock().unlock();
+            f.releaseWrite();
         }
     }
 
+//read
     public String readFile(String fileName) throws Exception {
-        fsLock.readLock().lock();
-        try {
-            FEntry target = null;
-            for (FEntry entry : inodeTable) {
-                if (entry != null && entry.getFilename().equals(fileName)) {
-                    target = entry;
-                    break;
-                }
-            }
-            if (target == null)
-                throw new Exception("Error: File " + fileName + " does not exist.");
+    int inodeIndex = findInodeIndex(fileName);
+    if (inodeIndex == -1) throw new Exception("Error: File " + fileName + " does not exist.");
 
-            byte[] data = new byte[target.getFilesize()];
-            int bytesRead = 0;
-            short currentBlock = target.getFirstBlock();
-            while (currentBlock != -1 && bytesRead < target.getFilesize()) {
-                disk.seek(blockToOffset(currentBlock));
-                int bytesToRead = Math.min(BLOCK_SIZE, target.getFilesize() - bytesRead);
-                disk.readFully(data, bytesRead, bytesToRead);
-                bytesRead += bytesToRead;
-                currentBlock++;
-                if (currentBlock >= freeBlockList.length) break;
-            }
-            return new String(data);
-        } finally {
-            fsLock.readLock().unlock();
+    FEntry f = inodeTable[inodeIndex];
+    f.acquireRead();
+    try {
+        int size = f.getFilesize();
+        if (size == 0) {
+            return "(empty file)";
         }
+
+        byte[] data = new byte[size];
+        int bytesRead = 0;
+        short currentBlock = f.getFirstBlock();
+
+        while (bytesRead < size && currentBlock >= 0 && currentBlock < freeBlockList.length) {
+            disk.seek(blockToOffset(currentBlock));
+            int toRead = Math.min(BLOCK_SIZE, size - bytesRead);
+            disk.readFully(data, bytesRead, toRead);
+            bytesRead += toRead;
+            currentBlock++;
+        }
+
+        return new String(data);
+    } finally {
+        f.releaseRead();
     }
+}
 
+//Delete
     public void deleteFile(String fileName) throws Exception {
-        fsLock.writeLock().lock();
+        int inodeIndex = findInodeIndex(fileName);
+        if (inodeIndex == -1) throw new Exception("Error: File " + fileName + " does not exist.");
+
+        FEntry f = inodeTable[inodeIndex];
+        f.acquireWrite();
         try {
-            int inodeIndex = findInodeIndex(fileName);
-            if (inodeIndex == -1)
-                throw new Exception("ERROR: file " + fileName + " does not exist.");
-
-            FEntry target = inodeTable[inodeIndex];
-            byte[] zeroBuffer = new byte[BLOCK_SIZE];
-
-            short currentBlock = target.getFirstBlock();
-            while (currentBlock != -1) {
-                disk.seek(blockToOffset(currentBlock));
-                disk.write(zeroBuffer);
-                freeBlockList[currentBlock] = true;
-                currentBlock++;
-                if (currentBlock >= freeBlockList.length) break;
+            globalLock.lock();
+            try {
+                short current = f.getFirstBlock();
+                while (current >= 0 && current < freeBlockList.length) {
+                    freeBlockList[current] = true;
+                    current++;
+                }
+                inodeTable[inodeIndex] = null;
+            } finally {
+                globalLock.unlock();
             }
-
-            inodeTable[inodeIndex] = null;
             System.out.println("File " + fileName + " deleted successfully.");
         } finally {
-            fsLock.writeLock().unlock();
+            f.releaseWrite();
         }
     }
 
+
+//List
     public String[] listFiles() {
-        fsLock.readLock().lock();
+        globalLock.lock();
         try {
             return java.util.Arrays.stream(inodeTable)
                     .filter(e -> e != null)
                     .map(FEntry::getFilename)
                     .toArray(String[]::new);
         } finally {
-            fsLock.readLock().unlock();
+            globalLock.unlock();
         }
     }
 }

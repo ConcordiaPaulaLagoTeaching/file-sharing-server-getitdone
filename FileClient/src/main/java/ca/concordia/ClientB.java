@@ -12,7 +12,6 @@ public class ClientB {
             System.out.println("ClientB connected to server");
             System.out.println(reader.readLine());
 
-            // Simulate waiting before sending commands
             Thread.sleep(5000);
 
             writer.println("WRITE testA.txt Added text from ClientB");

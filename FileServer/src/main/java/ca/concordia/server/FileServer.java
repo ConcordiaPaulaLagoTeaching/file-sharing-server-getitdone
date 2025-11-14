@@ -5,18 +5,16 @@ import ca.concordia.filesystem.FileSystemManager;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FileServer {
 
     private final FileSystemManager fsManager;
     private final int port;
-    private final ExecutorService threadPool = Executors.newFixedThreadPool(50, runnable -> {
-        Thread t = new Thread(runnable);
-        t.setName("ClientHandlerThread-" + t.getId());
-        return t;
-    });
+    private final ExecutorService threadPool;
 
     public FileServer(int port, String fileSystemName, int totalSize) {
         this.port = port;
@@ -24,8 +22,19 @@ public class FileServer {
             this.fsManager = new FileSystemManager(fileSystemName, totalSize);
         } catch (Exception e) {
             e.printStackTrace();
-            throw new RuntimeException("Failed to initialize FileSystemManager");
+            throw new RuntimeException("Failed to initialize FileSystemManager", e);
         }
+
+        // Thread pool 
+        int poolSize = Math.max(8, Runtime.getRuntime().availableProcessors() * 4);
+        AtomicInteger counter = new AtomicInteger(1);
+        ThreadFactory tf = r -> {
+            Thread t = new Thread(r);
+            t.setName("ClientHandler-" + counter.getAndIncrement());
+            t.setDaemon(false);
+            return t;
+        };
+        this.threadPool = Executors.newFixedThreadPool(poolSize, tf);
     }
 
     public void start() {
@@ -34,23 +43,24 @@ public class FileServer {
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("New client connected: " + clientSocket.getInetAddress());
-                // Handle each client in a separate thread
-               threadPool.submit(new ClientHandler(clientSocket, fsManager));
+                clientSocket.setSoTimeout(120_000);
+                System.out.println("New client connected: " + clientSocket.getRemoteSocketAddress());
+                threadPool.submit(new ClientHandler(clientSocket, fsManager));
             }
-
         } catch (Exception e) {
             e.printStackTrace();
-            System.err.println(" Could not start server on port " + port);
+            System.err.println("Could not start server on port " + port);
         } finally {
-            threadPool.shutdown();
-            System.out.println("Server shutting down.");
+            shutdownPool();
         }
     }
 
-    // ============================================================
-    // Inner Class: Handles one client connection per thread
-    // ============================================================
+    private void shutdownPool() {
+        threadPool.shutdown();
+        System.out.println("Server thread pool shutting down.");
+    }
+
+
     private static class ClientHandler implements Runnable {
         private final Socket clientSocket;
         private final FileSystemManager fsManager;
@@ -63,17 +73,16 @@ public class FileServer {
         @Override
         public void run() {
             try (
-                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true)
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                    PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true)
             ) {
-                String line;
                 writer.println(" Connected to FileServer. Type commands:");
 
+                String line;
                 while ((line = reader.readLine()) != null) {
-                    System.out.println("[Client " + clientSocket.getInetAddress() + "] " + line);
-                    String[] parts = line.split(" ", 3); // Allow space in content for WRITE
-
-                    if (parts.length == 0) continue;
+                    if (line.trim().isEmpty()) continue;
+                    System.out.println("[" + Thread.currentThread().getName() + " - " + clientSocket.getRemoteSocketAddress() + "] " + line);
+                    String[] parts = line.split(" ", 3);
                     String command = parts[0].toUpperCase();
 
                     try {
@@ -93,7 +102,7 @@ public class FileServer {
                             case "READ":
                                 if (parts.length < 2) throw new Exception("Usage: READ <filename>");
                                 String data = fsManager.readFile(parts[1]);
-                                writer.println("SUCCESS: File '" + parts[1] + "' contents:\n" + data);
+                                writer.println("SUCCESS: File '" + parts[1] + "' contents: " + data);
                                 break;
 
                             case "DELETE":
@@ -116,16 +125,14 @@ public class FileServer {
                                 writer.println("ERROR: Unknown command '" + command + "'");
                                 break;
                         }
-
                     } catch (Exception e) {
                         writer.println("ERROR: " + e.getMessage());
                     }
-
-                    writer.flush();
                 }
-
             } catch (IOException e) {
-                System.err.println("Client disconnected: " + clientSocket.getInetAddress());
+                System.err.println("Client disconnected: " + clientSocket.getRemoteSocketAddress());
+            } finally {
+                try { clientSocket.close(); } catch (Exception ignored) {}
             }
         }
     }
