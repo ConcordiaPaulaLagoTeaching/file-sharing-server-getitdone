@@ -3,6 +3,7 @@ package ca.concordia;
 import java.io.*;
 import java.net.Socket;
 
+//test client B
 public class ClientB {
     public static void main(String[] args) {
         try (Socket socket = new Socket("localhost", 12345);

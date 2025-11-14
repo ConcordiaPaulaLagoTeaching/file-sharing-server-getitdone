@@ -9,7 +9,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class FileSystemManager {
 
     private final int MAXFILES = 5;
-    private final int MAXBLOCKS = 5;
+    private final int MAXBLOCKS = 10;
     private static FileSystemManager instance;
     private final RandomAccessFile disk;
 
@@ -23,14 +23,10 @@ public class FileSystemManager {
         if (instance != null) {
             throw new IllegalStateException("FileSystemManager is already initialized.");
         }
-
         this.inodeTable = new FEntry[MAXFILES];
         this.freeBlockList = new boolean[MAXBLOCKS];
-
         this.disk = new RandomAccessFile(filename, "rw");
-
         long minSize = MAXBLOCKS + MAXFILES * 32L;
-
         if (disk.length() < minSize) {
             System.out.println("Disk missing or too small, initializing new filesystem...");
             disk.setLength(totalSize);
@@ -48,19 +44,16 @@ public class FileSystemManager {
                 saveMetadata();
             }
         }
-
         instance = this;
     }
 
-    // ---------------- Metadata ----------------
+    //makes sure the system saves new files
     private void saveMetadata() throws Exception {
         disk.seek(0);
-
         // free block list
         for (int i = 0; i < MAXBLOCKS; i++) {
             disk.writeBoolean(freeBlockList[i]);
         }
-
         // inode table
         for (int i = 0; i < MAXFILES; i++) {
             FEntry e = inodeTable[i];
@@ -80,21 +73,17 @@ public class FileSystemManager {
         }
     }
 
+    //makes sure the system remembers files
     private void loadMetadata() throws Exception {
         disk.seek(0);
-
-        // free block list
         for (int i = 0; i < MAXBLOCKS; i++) {
             freeBlockList[i] = disk.readBoolean();
         }
-
-        // inode table
         for (int i = 0; i < MAXFILES; i++) {
             boolean exists = false;
             try {
                 exists = disk.readBoolean();
             } catch (EOFException ignored) { }
-
             if (!exists) {
                 inodeTable[i] = null;
                 disk.seek(disk.getFilePointer() + 12 + 2 + 2);
@@ -102,19 +91,15 @@ public class FileSystemManager {
                 byte[] nameBytes = new byte[12];
                 disk.readFully(nameBytes);
 
-                // Trim trailing zeros and invalid chars
                 int nameLen = 0;
                 for (; nameLen < nameBytes.length; nameLen++) {
                     if (nameBytes[nameLen] == 0) break;
                 }
                 String name = new String(nameBytes, 0, nameLen);
-
                 short size = disk.readShort();
                 short firstBlock = disk.readShort();
-
                 // Safety: enforce max length 11
                 if (name.length() > 11) name = name.substring(0, 11);
-
                 inodeTable[i] = new FEntry(name, size, firstBlock);
             }
         }
@@ -133,7 +118,7 @@ public class FileSystemManager {
         return -1;
     }
 
-    // ---------------- File Operations ----------------
+    //file creation
     public void createFile(String fileName) throws Exception {
         if (fileName == null || fileName.isEmpty())
             throw new IllegalArgumentException("Filename cannot be null or empty.");
@@ -152,6 +137,7 @@ public class FileSystemManager {
                     break;
                 }
             }
+
             if (freeInodeIndex == -1) throw new Exception("Maximum number of files reached.");
 
             short firstFreeBlock = -1;
@@ -172,7 +158,7 @@ public class FileSystemManager {
             globalLock.unlock();
         }
     }
-
+    //writes content into file
     public void writeFile(String fileName, String content) throws Exception {
         int inodeIndex = findInodeIndex(fileName);
         if (inodeIndex == -1) throw new Exception("File does not exist.");
@@ -221,13 +207,13 @@ public class FileSystemManager {
                 dataOffset += chunkSize;
                 block++;
             }
-
+            //save into disk
             saveMetadata();
         } finally {
             f.releaseWrite();
         }
     }
-
+    //reads content from file
     public String readFile(String fileName) throws Exception {
         int inodeIndex = findInodeIndex(fileName);
         if (inodeIndex == -1) throw new Exception("File does not exist.");
@@ -255,7 +241,7 @@ public class FileSystemManager {
             f.releaseRead();
         }
     }
-
+    //deletes the whole file
     public void deleteFile(String fileName) throws Exception {
         int inodeIndex = findInodeIndex(fileName);
         if (inodeIndex == -1) throw new Exception("File does not exist.");
@@ -280,6 +266,7 @@ public class FileSystemManager {
         }
     }
 
+    //lists all files
     public String[] listFiles() {
         globalLock.lock();
         try {

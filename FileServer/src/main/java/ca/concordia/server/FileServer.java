@@ -16,6 +16,7 @@ public class FileServer {
     private final int port;
     private final ExecutorService threadPool;
 
+    // Constructor for FileServer
     public FileServer(int port, String fileSystemName, int totalSize) {
         this.port = port;
         try {
@@ -37,6 +38,7 @@ public class FileServer {
         this.threadPool = Executors.newFixedThreadPool(poolSize, tf);
     }
 
+    //initialize server
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             System.out.println("FileServer started on port " + port);
@@ -85,6 +87,7 @@ public class FileServer {
                     String[] parts = line.split(" ", 3);
                     String command = parts[0].toUpperCase();
 
+                    //handles client commands 
                     try {
                         switch (command) {
                             case "CREATE":

@@ -5,6 +5,7 @@ import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+//test launcher for multiple clients
 public class MultiClientLauncher {
 
     private static class TestClient implements Runnable {
